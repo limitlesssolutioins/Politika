@@ -184,23 +184,14 @@ export default function PuestosPage() {
         <span className="font-bold text-indigo-600">{row.estimado.toLocaleString("es-CO")}</span>
       ) : "-"
     },
-    { 
-      key: "votosReales", 
-      header: "Votos Reales", 
-      align: "right",
-      render: (row) => row.votosReales > 0 ? (
-        <span className="font-medium text-slate-700">{row.votosReales.toLocaleString("es-CO")}</span>
-      ) : "-"
-    },
     {
       key: "cumplimiento",
-      header: "Cumplimiento",
+      header: "% del Potencial",
       align: "center",
       render: (row) => {
-        if (!row.estimado || row.estimado === 0) return "-";
-        const perc = ((row.votosReales / row.estimado) * 100).toFixed(1);
-        const color = Number(perc) >= 100 ? "text-emerald-600" : Number(perc) >= 50 ? "text-amber-500" : "text-red-500";
-        return <span className={`font-semibold ${color}`}>{perc}%</span>;
+        if (!row.totalPosible || row.totalPosible === 0 || !row.estimado) return "-";
+        const perc = ((row.estimado / row.totalPosible) * 100).toFixed(2);
+        return <span className="font-semibold text-slate-600">{perc}%</span>;
       }
     }
   ];
