@@ -1,26 +1,44 @@
 {
-  "name": "electoral-app",
+  "name": "politika",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:create": "ts-node --project tsconfig.scripts.json scripts/create-tables.ts",
+    "import:csv": "ts-node --project tsconfig.scripts.json scripts/import-csv.ts"
   },
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.3.0",
+    "@prisma/client": "^7.3.0",
+    "@tanstack/react-table": "^8.21.3",
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.2.4",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.563.0",
     "next": "16.1.6",
+    "papaparse": "^5.5.3",
+    "prisma": "^7.3.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "react-leaflet": "^5.0.0",
+    "recharts": "^3.7.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/leaflet": "^1.9.21",
     "@types/node": "^20",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }

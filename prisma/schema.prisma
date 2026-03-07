@@ -1,0 +1,171 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Departamento {
+  id        Int        @id @default(autoincrement())
+  codigo    String     @unique
+  nombre    String
+  municipios Municipio[]
+  resumenDepartamento ResumenDepartamento[]
+}
+
+model Municipio {
+  id              Int           @id @default(autoincrement())
+  codigo          String
+  nombre          String
+  departamentoId  Int
+  departamento    Departamento  @relation(fields: [departamentoId], references: [id])
+  zonas           Zona[]
+  comunas         Comuna[]
+  resumenMunicipio ResumenMunicipio[]
+
+  @@unique([codigo, departamentoId])
+}
+
+model Zona {
+  id           Int       @id @default(autoincrement())
+  codigo       String
+  municipioId  Int
+  municipio    Municipio @relation(fields: [municipioId], references: [id])
+  puestos      Puesto[]
+
+  @@unique([codigo, municipioId])
+}
+
+model Puesto {
+  id            Int    @id @default(autoincrement())
+  codigo        String
+  nombre        String
+  zonaId        Int
+  estimadoVotos Int?
+  zona          Zona   @relation(fields: [zonaId], references: [id])
+  mesas         Mesa[]
+
+  @@unique([codigo, zonaId])
+}
+
+model Mesa {
+  id                 Int    @id @default(autoincrement())
+  numero             Int
+  puestoId           Int
+  potencialElectoral Int?
+  estimadoVotos      Int?
+  puesto             Puesto @relation(fields: [puestoId], references: [id])
+  votos              Voto[]
+
+  @@unique([numero, puestoId])
+}
+
+model Comuna {
+  id           Int       @id @default(autoincrement())
+  codigo       String
+  nombre       String
+  municipioId  Int
+  municipio    Municipio @relation(fields: [municipioId], references: [id])
+
+  @@unique([codigo, municipioId])
+}
+
+model Corporacion {
+  id      Int    @id @default(autoincrement())
+  codigo  String @unique
+  nombre  String
+  votos   Voto[]
+  resumenDepartamento ResumenDepartamento[]
+  resumenMunicipio    ResumenMunicipio[]
+  objetivos           ObjetivoCampana[]
+}
+
+model Partido {
+  id         Int         @id @default(autoincrement())
+  codigo     String      @unique
+  nombre     String
+  candidatos Candidato[]
+  votos      Voto[]
+  resumenDepartamento ResumenDepartamento[]
+  resumenMunicipio    ResumenMunicipio[]
+  objetivos           ObjetivoCampana[]
+}
+
+model Candidato {
+  id        Int     @id @default(autoincrement())
+  codigo    String
+  nombre    String
+  partidoId Int
+  partido   Partido @relation(fields: [partidoId], references: [id])
+  votos     Voto[]
+
+  @@unique([codigo, partidoId])
+}
+
+model Voto {
+  id              Int         @id @default(autoincrement())
+  mesaId          Int
+  corporacionId   Int
+  circunscripcion String
+  partidoId       Int
+  candidatoId     Int
+  totalVotos      Int
+  mesa            Mesa        @relation(fields: [mesaId], references: [id])
+  corporacion     Corporacion @relation(fields: [corporacionId], references: [id])
+  partido         Partido     @relation(fields: [partidoId], references: [id])
+  candidato       Candidato   @relation(fields: [candidatoId], references: [id])
+
+  @@index([corporacionId, partidoId])
+  @@index([mesaId])
+  @@index([candidatoId])
+  @@index([partidoId])
+  @@index([corporacionId])
+}
+
+model ResumenDepartamento {
+  id              Int         @id @default(autoincrement())
+  departamentoId  Int
+  corporacionId   Int
+  partidoId       Int
+  totalVotos      Int
+  departamento    Departamento @relation(fields: [departamentoId], references: [id])
+  corporacion     Corporacion  @relation(fields: [corporacionId], references: [id])
+  partido         Partido      @relation(fields: [partidoId], references: [id])
+
+  @@unique([departamentoId, corporacionId, partidoId])
+  @@index([departamentoId])
+  @@index([corporacionId])
+  @@index([partidoId])
+}
+
+model ResumenMunicipio {
+  id             Int         @id @default(autoincrement())
+  municipioId    Int
+  corporacionId  Int
+  partidoId      Int
+  totalVotos     Int
+  municipio      Municipio   @relation(fields: [municipioId], references: [id])
+  corporacion    Corporacion @relation(fields: [corporacionId], references: [id])
+  partido        Partido     @relation(fields: [partidoId], references: [id])
+
+  @@unique([municipioId, corporacionId, partidoId])
+  @@index([municipioId])
+  @@index([corporacionId])
+  @@index([partidoId])
+}
+
+model ObjetivoCampana {
+  id             Int         @id @default(autoincrement())
+  nivel          String      // "departamento", "municipio", "puesto"
+  nivelId        Int
+  partidoId      Int
+  corporacionId  Int
+  metaVotos      Int
+  partido        Partido     @relation(fields: [partidoId], references: [id])
+  corporacion    Corporacion @relation(fields: [corporacionId], references: [id])
+
+  @@unique([nivel, nivelId, partidoId, corporacionId])
+  @@index([partidoId])
+  @@index([corporacionId])
+}
