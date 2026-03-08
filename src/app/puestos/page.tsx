@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Upload, MapPin, Building2, ChevronRight, CheckCircle2, ArrowLeft } from "lucide-react";
 import DataTable, { type Column } from "@/components/DataTable";
+import ImportModal from "@/components/ImportModal";
 
 // Dynamically import map to avoid SSR issues with Leaflet
 const MapComponent = dynamic(() => import("@/components/MapComponent"), { ssr: false });
@@ -56,7 +57,7 @@ export default function PuestosPage() {
   const [loading, setLoading] = useState(true);
   
   // Upload states
-  const [isUploading, setIsUploading] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
 
   const fetchDepartamentos = () => {
@@ -128,40 +129,12 @@ export default function PuestosPage() {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    setUploadResult(null);
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const res = await fetch("/api/puestos/upload", {
-        method: "POST",
-        body: formData
-      });
-      const data = await res.json();
-      
-      if (res.ok) {
-        setUploadResult(data);
-        // Refresh current view
-        if (nivel === "departamentos") fetchDepartamentos();
-        else if (nivel === "municipios" && selectedDepto) handleDeptoClick(selectedDepto.id, selectedDepto.nombre);
-        else if (nivel === "puestos" && selectedMuni) handleMuniClick(selectedMuni.id, selectedMuni.nombre);
-      } else {
-        alert(`Error: ${data.error}`);
-      }
-    } catch (error) {
-      console.error(error);
-      alert("Error al subir el archivo");
-    } finally {
-      setIsUploading(false);
-      // clear input
-      e.target.value = "";
-    }
+  const handleImportSuccess = () => {
+    setIsImportModalOpen(false);
+    // Refresh current view
+    if (nivel === "departamentos") fetchDepartamentos();
+    else if (nivel === "municipios" && selectedDepto) handleDeptoClick(selectedDepto.id, selectedDepto.nombre);
+    else if (nivel === "puestos" && selectedMuni) handleMuniClick(selectedMuni.id, selectedMuni.nombre);
   };
 
   const columnsPuestos: Column<PuestoData>[] = [
@@ -232,29 +205,21 @@ export default function PuestosPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {uploadResult && (
-            <div className="flex items-center gap-1 text-xs font-medium text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
-              <CheckCircle2 size={14} />
-              {uploadResult.actualizados} actualizados ({uploadResult.noEncontrados} no cruzaron)
-            </div>
-          )}
-          <label className={`flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer ${isUploading ? 'opacity-70 pointer-events-none' : 'hover:bg-slate-800'}`}>
-            {isUploading ? (
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <Upload size={16} />
-            )}
-            Subir Excel
-            <input 
-              type="file" 
-              accept=".xlsx,.xls,.csv" 
-              className="hidden" 
-              onChange={handleFileUpload} 
-              disabled={isUploading}
-            />
-          </label>
+          <button 
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium transition-colors hover:bg-slate-800"
+          >
+            <Upload size={16} />
+            Importar Datos
+          </button>
         </div>
       </div>
+
+      <ImportModal 
+        isOpen={isImportModalOpen} 
+        onClose={() => setIsImportModalOpen(false)} 
+        onSuccess={handleImportSuccess} 
+      />
 
       {/* Main Content */}
       <div className="flex flex-col lg:flex-row gap-6 h-full min-h-0 overflow-hidden">
