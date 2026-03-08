@@ -20,6 +20,12 @@ export async function GET(request: NextRequest) {
         }
       });
 
+      const mesasAgg = await prisma.mesa.groupBy({
+        by: ['puestoId'],
+        _sum: { potencialElectoral: true }
+      });
+      const mesaPotencialMap = new Map(mesasAgg.map(m => [m.puestoId, m._sum.potencialElectoral || 0]));
+
       const deptoStats = new Map<number, { totalPuestos: number, totalEstimado: number, totalPosible: number, mesas: number }>();
       
       for (const p of puestos) {
@@ -27,7 +33,7 @@ export async function GET(request: NextRequest) {
         const current = deptoStats.get(dId) || { totalPuestos: 0, totalEstimado: 0, totalPosible: 0, mesas: 0 };
         current.totalPuestos += 1;
         current.totalEstimado += (p.estimadoVotos || 0);
-        current.totalPosible += (p.potencialElectoral || 0);
+        current.totalPosible += (p.potencialElectoral || mesaPotencialMap.get(p.id) || 0);
         current.mesas += p._count.mesas;
         deptoStats.set(dId, current);
       }
@@ -55,6 +61,20 @@ export async function GET(request: NextRequest) {
         include: { zona: { select: { municipioId: true } }, _count: { select: { mesas: true } } }
       });
 
+      const puestoIds = puestos.map(p => p.id);
+      const mesasAgg: { puestoId: number; _sum: { potencialElectoral: number | null } }[] = [];
+      const CHUNK_SIZE = 900;
+      for (let i = 0; i < puestoIds.length; i += CHUNK_SIZE) {
+        const chunk = puestoIds.slice(i, i + CHUNK_SIZE);
+        const batch = await prisma.mesa.groupBy({
+          by: ['puestoId'],
+          where: { puestoId: { in: chunk } },
+          _sum: { potencialElectoral: true }
+        });
+        mesasAgg.push(...batch);
+      }
+      const mesaPotencialMap = new Map(mesasAgg.map(m => [m.puestoId, m._sum.potencialElectoral || 0]));
+
       const muniStats = new Map<number, { totalPuestos: number, totalEstimado: number, totalPosible: number, mesas: number }>();
       
       for (const p of puestos) {
@@ -62,7 +82,7 @@ export async function GET(request: NextRequest) {
         const current = muniStats.get(mId) || { totalPuestos: 0, totalEstimado: 0, totalPosible: 0, mesas: 0 };
         current.totalPuestos += 1;
         current.totalEstimado += (p.estimadoVotos || 0);
-        current.totalPosible += (p.potencialElectoral || 0);
+        current.totalPosible += (p.potencialElectoral || mesaPotencialMap.get(p.id) || 0);
         current.mesas += p._count.mesas;
         muniStats.set(mId, current);
       }
@@ -91,8 +111,20 @@ export async function GET(request: NextRequest) {
       // For each puesto, calculate total actual votes across all its mesas
       const puestoIds = puestos.map(p => p.id);
       
-      const mesaPuestoMap = new Map<number, number>();
+      const mesasAgg: { puestoId: number; _sum: { potencialElectoral: number | null } }[] = [];
       const CHUNK_SIZE = 900;
+      for (let i = 0; i < puestoIds.length; i += CHUNK_SIZE) {
+        const chunk = puestoIds.slice(i, i + CHUNK_SIZE);
+        const batch = await prisma.mesa.groupBy({
+          by: ['puestoId'],
+          where: { puestoId: { in: chunk } },
+          _sum: { potencialElectoral: true }
+        });
+        mesasAgg.push(...batch);
+      }
+      const mesaPotencialMap = new Map(mesasAgg.map(m => [m.puestoId, m._sum.potencialElectoral || 0]));
+      
+      const mesaPuestoMap = new Map<number, number>();
       
       // Fetch in chunks to avoid SQLite "too many SQL variables" (limit 999)
       const mesasObj = [];
@@ -136,7 +168,7 @@ export async function GET(request: NextRequest) {
         zona: p.zona.codigo,
         mesas: p._count.mesas,
         estimado: p.estimadoVotos || 0,
-        totalPosible: p.potencialElectoral || 0,
+        totalPosible: p.potencialElectoral || mesaPotencialMap.get(p.id) || 0,
         votosReales: puestoRealVotes.get(p.id) || 0
       }));
 
