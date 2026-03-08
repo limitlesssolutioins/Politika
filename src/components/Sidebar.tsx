@@ -21,9 +21,7 @@ import { useState, useEffect } from "react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/geografia", label: "Geografía Electoral", icon: MapPin },
   { href: "/puestos", label: "Puestos de Votación", icon: MapPin },
-  { href: "/mesas", label: "Potencial Mesas", icon: Hash },
   { href: "/partidos", label: "Partidos", icon: Users },
   { href: "/candidatos", label: "Candidatos", icon: UserCheck },
   { href: "/corporaciones", label: "Corporaciones", icon: Building2 },

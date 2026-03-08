@@ -38,13 +38,14 @@ model Zona {
 }
 
 model Puesto {
-  id            Int    @id @default(autoincrement())
-  codigo        String
-  nombre        String
-  zonaId        Int
-  estimadoVotos Int?
-  zona          Zona   @relation(fields: [zonaId], references: [id])
-  mesas         Mesa[]
+  id                 Int    @id @default(autoincrement())
+  codigo             String
+  nombre             String
+  zonaId             Int
+  estimadoVotos      Int?
+  potencialElectoral Int?
+  zona               Zona   @relation(fields: [zonaId], references: [id])
+  mesas              Mesa[]
 
   @@unique([codigo, zonaId])
 }
