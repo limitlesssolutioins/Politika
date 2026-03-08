@@ -164,6 +164,7 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
                       <th className="px-4 py-3 font-medium">Extraído del Archivo</th>
                       <th className="px-4 py-3 font-medium">Cruce en BD</th>
                       <th className="px-4 py-3 font-medium text-right">Votos a Sumar</th>
+                      <th className="px-4 py-3 font-medium text-right">Potencial Extraído</th>
                       <th className="px-4 py-3 font-medium text-center">Estado</th>
                     </tr>
                   </thead>
@@ -173,6 +174,7 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
                         <td className="px-4 py-3 text-slate-300">{row.original}</td>
                         <td className="px-4 py-3 text-slate-300">{row.matched}</td>
                         <td className="px-4 py-3 text-right font-mono text-blue-400">+{row.votos}</td>
+                        <td className="px-4 py-3 text-right font-mono text-emerald-400">{row.potencial > 0 ? `+${row.potencial}` : '-'}</td>
                         <td className="px-4 py-3 text-center">
                           {row.status === 'ok' ? (
                             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">
@@ -188,7 +190,7 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
                     ))}
                     {previewData.previewData?.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                        <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                           No se extrajeron datos para mostrar.
                         </td>
                       </tr>
