@@ -21,17 +21,18 @@ function normalizeString(str: string): string {
 async function detectColumnsWithAI(data: any[][]) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return { headerRowIdx: -1, puestoColIdx: -1, votosColIdx: null };
+    if (!apiKey) return { headerRowIdx: -1, puestoColIdx: -1, votosColIdx: null, potencialColIdx: null };
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const sampleData = data.slice(0, 15);
     const prompt = `
 Analiza las siguientes filas de una tabla. Identifica los índices (empezando en 0):
 1. El "Puesto de Votación", "Lugar de Votación", "Puesto", etc.
-2. La "Cantidad de Votos" o "Potencial Electoral". Si es una lista de votantes (1 fila = 1 voto), "votosColIdx": null.
+2. La "Cantidad de Votos Estimados" o si es un listado nominal "votosColIdx": null.
+3. El "Potencial Electoral", "Mesas Potencial", "Censo" (si no hay, "potencialColIdx": null).
 Si no encuentras el puesto, "puestoColIdx": null. Indica "headerRowIdx" (índice de fila de los encabezados).
 Devuelve SOLO JSON válido sin texto adicional.
-Ejemplo: {"headerRowIdx": 0, "puestoColIdx": 2, "votosColIdx": null}
+Ejemplo: {"headerRowIdx": 0, "puestoColIdx": 2, "votosColIdx": null, "potencialColIdx": 5}
 Datos: ${JSON.stringify(sampleData)}
     `;
 
@@ -39,10 +40,10 @@ Datos: ${JSON.stringify(sampleData)}
     const text = result.response.text().trim();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return { headerRowIdx: -1, puestoColIdx: -1, votosColIdx: null };
+    return { headerRowIdx: -1, puestoColIdx: -1, votosColIdx: null, potencialColIdx: null };
   } catch (error) {
     console.error("Error AI (Excel):", error);
-    return { headerRowIdx: -1, puestoColIdx: -1, votosColIdx: null };
+    return { headerRowIdx: -1, puestoColIdx: -1, votosColIdx: null, potencialColIdx: null };
   }
 }
 
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest) {
       puestoMap.set(normalizeString(p.nombre), p);
     });
 
-    const conteoPorPuestoId: Record<number, number> = {};
+    const conteoPorPuestoId: Record<number, { votos: number, potencial: number }> = {};
     const unmatched: Record<string, number> = {};
     let totalRows = 0;
     let totalMatched = 0;
@@ -167,7 +168,8 @@ export async function POST(req: NextRequest) {
         }
         
         // --- 2. IA OBTENCIÓN DE COLUMNAS ---
-        let { headerRowIdx, puestoColIdx, votosColIdx } = await detectColumnsWithAI(data);
+        let aiResult = await detectColumnsWithAI(data);
+        let { headerRowIdx, puestoColIdx, votosColIdx, potencialColIdx } = aiResult;
         
         // Fallback manual
         if (puestoColIdx === null || puestoColIdx === -1) {
@@ -229,16 +231,30 @@ export async function POST(req: NextRequest) {
             }
           }
 
+          let potencialASumar = 0;
+          if (potencialColIdx !== null && potencialColIdx !== undefined && row[potencialColIdx] !== undefined) {
+            const rawPotencial = String(row[potencialColIdx]);
+            const numPotencial = parseInt(rawPotencial.replace(/[^0-9]/g, ''), 10);
+            if (!isNaN(numPotencial)) {
+              potencialASumar = numPotencial;
+            }
+          }
+
           if (match) {
             totalMatched++;
             fileMatched++;
-            conteoPorPuestoId[match.id] = (conteoPorPuestoId[match.id] || 0) + votosASumar;
+            if (!conteoPorPuestoId[match.id]) {
+                conteoPorPuestoId[match.id] = { votos: 0, potencial: 0 };
+            }
+            conteoPorPuestoId[match.id].votos += votosASumar;
+            conteoPorPuestoId[match.id].potencial += potencialASumar;
             
             if (action === 'preview' && previewData.length < 50) {
               previewData.push({
                 original: puestoValue,
                 matched: match.nombre,
                 votos: votosASumar,
+                potencial: potencialASumar,
                 status: 'ok'
               });
             }
@@ -249,6 +265,7 @@ export async function POST(req: NextRequest) {
                  original: puestoValue,
                  matched: 'No encontrado',
                  votos: votosASumar,
+                 potencial: potencialASumar,
                  status: 'error'
                });
             }
@@ -279,9 +296,8 @@ export async function POST(req: NextRequest) {
       await prisma.puesto.update({
         where: { id: Number(puestoId) },
         data: { 
-          estimadoVotos: {
-            increment: conteo
-          } 
+          estimadoVotos: conteo.votos > 0 ? { increment: conteo.votos } : undefined,
+          potencialElectoral: conteo.potencial > 0 ? { increment: conteo.potencial } : undefined
         }
       });
       updatedCount++;
