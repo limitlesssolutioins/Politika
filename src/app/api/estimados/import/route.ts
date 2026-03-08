@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { prisma } from '@/lib/prisma';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-// @ts-expect-error - pdf-parse types are not perfect with ESM/CJS interop in Next.js
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 
 // Configuración de Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -54,7 +53,8 @@ async function processImageOrPdfWithAI(file: File): Promise<any[][] | null> {
     if (!apiKey) throw new Error("GEMINI_API_KEY no configurada.");
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
     
     let base64Data = buffer.toString("base64");
     let mimeType = file.type;
@@ -62,8 +62,14 @@ async function processImageOrPdfWithAI(file: File): Promise<any[][] | null> {
     // Si es PDF y falla el modelo multimodal, extraemos texto manualmente
     let pdfText = "";
     if (file.type === 'application/pdf') {
-       const parsed = await pdfParse(buffer);
-       pdfText = parsed.text;
+       try {
+         const parser = new PDFParse({ data: new Uint8Array(bytes) });
+         const result = await parser.getText();
+         pdfText = result.text;
+         await parser.destroy();
+       } catch (pdfError) {
+         console.warn("Error parsing PDF text, will rely on vision:", pdfError);
+       }
     }
 
     const prompt = `
@@ -79,11 +85,11 @@ ${pdfText ? `Texto extraído del PDF:\n${pdfText}` : ""}
     `;
 
     let result;
-    if (pdfText) {
-        // Enviar solo texto para PDF parseado
+    if (pdfText && pdfText.length > 50) {
+        // Si pudimos extraer bastante texto, enviamos solo texto para mayor precisión
         result = await model.generateContent(prompt);
     } else {
-        // Enviar imagen (multimodal)
+        // Enviar imagen (multimodal) si no hay texto o es poco
         result = await model.generateContent([
             prompt,
             {
