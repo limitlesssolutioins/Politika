@@ -161,20 +161,29 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-900/50 text-slate-400 border-b border-slate-700">
                     <tr>
-                      <th className="px-4 py-3 font-medium">Extraído del Archivo</th>
+                      <th className="px-4 py-3 font-medium">Extraído (Depto / Muni / Puesto)</th>
                       <th className="px-4 py-3 font-medium">Cruce en BD</th>
-                      <th className="px-4 py-3 font-medium text-right">Votos a Sumar</th>
-                      <th className="px-4 py-3 font-medium text-right">Potencial Extraído</th>
+                      <th className="px-4 py-3 font-medium text-center">Tipo Cruce</th>
+                      <th className="px-4 py-3 font-medium text-right">Votos</th>
                       <th className="px-4 py-3 font-medium text-center">Estado</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-700/50">
                     {previewData.previewData?.map((row: any, i: number) => (
                       <tr key={i} className="hover:bg-slate-700/30 transition">
-                        <td className="px-4 py-3 text-slate-300">{row.original}</td>
-                        <td className="px-4 py-3 text-slate-300">{row.matched}</td>
-                        <td className="px-4 py-3 text-right font-mono text-blue-400">+{row.votos}</td>
-                        <td className="px-4 py-3 text-right font-mono text-emerald-400">{row.potencial > 0 ? `+${row.potencial}` : '-'}</td>
+                        <td className="px-4 py-3 text-slate-300 text-xs">{row.original}</td>
+                        <td className="px-4 py-3 text-slate-300 text-xs">{row.matched}</td>
+                        <td className="px-4 py-3 text-center">
+                          {row.matchLevel && row.matchLevel !== '-' ? (
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                              row.matchLevel === 'Depto+Muni+Puesto' ? 'bg-green-500/20 text-green-300' :
+                              row.matchLevel === 'Muni+Puesto'       ? 'bg-blue-500/20 text-blue-300'  :
+                              row.matchLevel === 'Solo Nombre'       ? 'bg-yellow-500/20 text-yellow-300' :
+                              'bg-orange-500/20 text-orange-300'
+                            }`}>{row.matchLevel}</span>
+                          ) : <span className="text-slate-600 text-xs">–</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono text-blue-400 text-xs">+{row.votos}</td>
                         <td className="px-4 py-3 text-center">
                           {row.status === 'ok' ? (
                             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium">
@@ -182,7 +191,7 @@ export default function ImportModal({ isOpen, onClose, onSuccess }: ImportModalP
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/10 text-red-400 text-xs font-medium">
-                              <AlertCircle className="w-3 h-3" /> Fallo
+                              <AlertCircle className="w-3 h-3" /> No encontrado
                             </span>
                           )}
                         </td>
