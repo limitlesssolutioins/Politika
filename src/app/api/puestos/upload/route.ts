@@ -34,15 +34,28 @@ export async function POST(request: NextRequest) {
     }
 
     const headers = data[0].map((h: unknown) => normalizeString(h));
-    
-    const idxDepto = headers.findIndex((h) => h.includes("DEPARTAMENTO"));
-    const idxMuni = headers.findIndex((h) => h.includes("MUNICIPIO"));
-    const idxPuesto = headers.findIndex((h) => h.includes("PUESTO"));
-    const idxEstimado = headers.findIndex((h) => h.includes("ESTIMADO") || h.includes("META") || h.includes("VOTOS"));
 
-    if (idxDepto === -1 || idxMuni === -1 || idxPuesto === -1 || idxEstimado === -1) {
-      return NextResponse.json({ 
-        error: "El Excel debe contener las columnas: DEPARTAMENTO, MUNICIPIO, PUESTO, ESTIMADO" 
+    const idxDepto = headers.findIndex((h) => h.includes("DEPARTAMENTO") || h.includes("DEPTO") || h.includes("DPTO"));
+    const idxMuni = headers.findIndex((h) => h.includes("MUNICIPIO") || h.includes("MUNI") || h.includes("CIUDAD"));
+    const idxPuesto = headers.findIndex((h) => h.includes("PUESTO") || h.includes("LUGAR") || h.includes("CENTRO"));
+    const idxEstimado = headers.findIndex((h) =>
+      (h.includes("ESTIMADO") || h.includes("META") || h.includes("VOTOS")) &&
+      !h.includes("POTENCIAL") && !h.includes("POSIBLE")
+    );
+    const idxPotencial = headers.findIndex((h) =>
+      h.includes("POTENCIAL") || h.includes("CENSO") || h.includes("INSCRITOS") ||
+      h.includes("HABILITADOS") || h.includes("POSIBLE")
+    );
+
+    if (idxDepto === -1 || idxMuni === -1 || idxPuesto === -1) {
+      return NextResponse.json({
+        error: "El Excel debe contener las columnas: DEPARTAMENTO, MUNICIPIO, PUESTO. Opcionalmente: ESTIMADO y/o POTENCIAL"
+      }, { status: 400 });
+    }
+
+    if (idxEstimado === -1 && idxPotencial === -1) {
+      return NextResponse.json({
+        error: "El Excel debe contener al menos una de estas columnas: ESTIMADO (votos estimados) o POTENCIAL (potencial electoral)"
       }, { status: 400 });
     }
 
@@ -74,7 +87,7 @@ export async function POST(request: NextRequest) {
     let actualizados = 0;
     let noEncontrados = 0;
 
-    const updates: {id: number, estimado: number}[] = [];
+    const updates: { id: number; estimado: number | null; potencial: number | null }[] = [];
 
     // Parse rows
     for (let i = 1; i < data.length; i++) {
@@ -84,15 +97,24 @@ export async function POST(request: NextRequest) {
       const depto = normalizeString(row[idxDepto]);
       const muni = normalizeString(row[idxMuni]);
       const puesto = normalizeString(row[idxPuesto]);
-      const estimado = parseInt(row[idxEstimado]);
 
-      if (!depto || !muni || !puesto || isNaN(estimado)) continue;
+      if (!depto || !muni || !puesto) continue;
+
+      const estimado = idxEstimado !== -1 ? parseInt(row[idxEstimado]) : null;
+      const potencial = idxPotencial !== -1 ? parseInt(row[idxPotencial]) : null;
+
+      // Skip row if neither value is valid
+      if ((estimado === null || isNaN(estimado)) && (potencial === null || isNaN(potencial))) continue;
 
       const key = `${depto}|${muni}|${puesto}`;
       const puestoId = puestoMap.get(key);
 
       if (puestoId) {
-        updates.push({ id: puestoId, estimado });
+        updates.push({
+          id: puestoId,
+          estimado: estimado !== null && !isNaN(estimado) ? estimado : null,
+          potencial: potencial !== null && !isNaN(potencial) ? potencial : null,
+        });
         actualizados++;
       } else {
         noEncontrados++;
@@ -101,20 +123,25 @@ export async function POST(request: NextRequest) {
 
     // Process updates in transaction
     if (updates.length > 0) {
-      // SQLite limit variables, so we run them sequentially or in batches.
-      // Doing simple individual updates within a transaction for safety
-      await prisma.$transaction(
-        updates.map(u => 
-          prisma.puesto.update({
-            where: { id: u.id },
-            data: { estimadoVotos: u.estimado }
-          })
-        )
-      );
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+        const batch = updates.slice(i, i + BATCH_SIZE);
+        await prisma.$transaction(
+          batch.map(u =>
+            prisma.puesto.update({
+              where: { id: u.id },
+              data: {
+                ...(u.estimado !== null ? { estimadoVotos: u.estimado } : {}),
+                ...(u.potencial !== null ? { potencialElectoral: u.potencial } : {}),
+              }
+            })
+          )
+        );
+      }
     }
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       actualizados,
       noEncontrados,
       total: data.length - 1

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
       const deptos = await prisma.departamento.findMany({
         orderBy: { nombre: "asc" }
       });
-      
+
       const puestos = await prisma.puesto.findMany({
         include: {
           zona: { select: { municipio: { select: { departamentoId: true } } } },
@@ -26,8 +26,22 @@ export async function GET(request: NextRequest) {
       });
       const mesaPotencialMap = new Map(mesasAgg.map(m => [m.puestoId, m._sum.potencialElectoral || 0]));
 
+      // Votos reales (E14) agregados por departamento via SQL eficiente
+      const deptoVotesRaw = await prisma.$queryRaw<Array<{ departamentoId: number; totalVotos: number }>>`
+        SELECT mu.departamentoId, CAST(COALESCE(SUM(v.totalVotos), 0) AS INTEGER) as totalVotos
+        FROM Voto v
+        JOIN Mesa m ON v.mesaId = m.id
+        JOIN Puesto p ON m.puestoId = p.id
+        JOIN Zona z ON p.zonaId = z.id
+        JOIN Municipio mu ON z.municipioId = mu.id
+        GROUP BY mu.departamentoId
+      `;
+      const deptoVotesMap = new Map<number, number>(
+        deptoVotesRaw.map(r => [r.departamentoId, Number(r.totalVotos) || 0])
+      );
+
       const deptoStats = new Map<number, { totalPuestos: number, totalEstimado: number, totalPosible: number, mesas: number }>();
-      
+
       for (const p of puestos) {
         const dId = p.zona.municipio.departamentoId;
         const current = deptoStats.get(dId) || { totalPuestos: 0, totalEstimado: 0, totalPosible: 0, mesas: 0 };
@@ -45,14 +59,16 @@ export async function GET(request: NextRequest) {
         totalEstimado: deptoStats.get(d.id)?.totalEstimado || 0,
         totalPosible: deptoStats.get(d.id)?.totalPosible || 0,
         totalMesas: deptoStats.get(d.id)?.mesas || 0,
+        totalVotosReales: deptoVotesMap.get(d.id) || 0,
       }));
 
       return NextResponse.json(result);
     }
 
     if (nivel === "municipios" && parentId) {
+      const deptoId = parseInt(parentId);
       const municipios = await prisma.municipio.findMany({
-        where: { departamentoId: parseInt(parentId) },
+        where: { departamentoId: deptoId },
         orderBy: { nombre: "asc" }
       });
 
@@ -75,8 +91,23 @@ export async function GET(request: NextRequest) {
       }
       const mesaPotencialMap = new Map(mesasAgg.map(m => [m.puestoId, m._sum.potencialElectoral || 0]));
 
+      // Votos reales (E14) agregados por municipio via SQL eficiente
+      const muniVotesRaw = await prisma.$queryRaw<Array<{ municipioId: number; totalVotos: number }>>`
+        SELECT z.municipioId, CAST(COALESCE(SUM(v.totalVotos), 0) AS INTEGER) as totalVotos
+        FROM Voto v
+        JOIN Mesa m ON v.mesaId = m.id
+        JOIN Puesto p ON m.puestoId = p.id
+        JOIN Zona z ON p.zonaId = z.id
+        JOIN Municipio mu ON z.municipioId = mu.id
+        WHERE mu.departamentoId = ${deptoId}
+        GROUP BY z.municipioId
+      `;
+      const muniVotesMap = new Map<number, number>(
+        muniVotesRaw.map(r => [r.municipioId, Number(r.totalVotos) || 0])
+      );
+
       const muniStats = new Map<number, { totalPuestos: number, totalEstimado: number, totalPosible: number, mesas: number }>();
-      
+
       for (const p of puestos) {
         const mId = p.zona.municipioId;
         const current = muniStats.get(mId) || { totalPuestos: 0, totalEstimado: 0, totalPosible: 0, mesas: 0 };
@@ -94,6 +125,7 @@ export async function GET(request: NextRequest) {
         totalEstimado: muniStats.get(m.id)?.totalEstimado || 0,
         totalPosible: muniStats.get(m.id)?.totalPosible || 0,
         totalMesas: muniStats.get(m.id)?.mesas || 0,
+        totalVotosReales: muniVotesMap.get(m.id) || 0,
       }));
 
       return NextResponse.json(result);

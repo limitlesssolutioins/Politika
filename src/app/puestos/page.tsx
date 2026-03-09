@@ -18,6 +18,7 @@ interface DeptoData {
   totalEstimado: number;
   totalPosible: number;
   totalMesas: number;
+  totalVotosReales: number;
 }
 
 interface MuniData {
@@ -27,6 +28,7 @@ interface MuniData {
   totalEstimado: number;
   totalPosible: number;
   totalMesas: number;
+  totalVotosReales: number;
 }
 
 interface PuestoData {
@@ -141,30 +143,49 @@ export default function PuestosPage() {
     { key: "zona", header: "Zona" },
     { key: "nombre", header: "Nombre del Puesto" },
     { key: "mesas", header: "Mesas", align: "center" },
-    { 
-      key: "totalPosible", 
-      header: "Potencial (Total Posible)", 
+    {
+      key: "totalPosible",
+      header: "Potencial",
       align: "right",
       render: (row) => row.totalPosible > 0 ? (
         <span className="text-slate-600">{row.totalPosible.toLocaleString("es-CO")}</span>
-      ) : "-"
+      ) : <span className="text-slate-300">-</span>
     },
-    { 
-      key: "estimado", 
-      header: "Votos Estimados", 
+    {
+      key: "estimado",
+      header: "Estimados",
       align: "right",
       render: (row) => row.estimado > 0 ? (
         <span className="font-bold text-indigo-600">{row.estimado.toLocaleString("es-CO")}</span>
-      ) : "-"
+      ) : <span className="text-slate-300">-</span>
+    },
+    {
+      key: "votosReales",
+      header: "Votos E14",
+      align: "right",
+      render: (row) => row.votosReales > 0 ? (
+        <span className="font-bold text-emerald-600">{row.votosReales.toLocaleString("es-CO")}</span>
+      ) : <span className="text-slate-300">-</span>
     },
     {
       key: "cumplimiento",
-      header: "% del Potencial",
+      header: "% vs Estimado",
       align: "center",
       render: (row) => {
-        if (!row.totalPosible || row.totalPosible === 0 || !row.estimado) return "-";
-        const perc = ((row.estimado / row.totalPosible) * 100).toFixed(2);
-        return <span className="font-semibold text-slate-600">{perc}%</span>;
+        if (!row.estimado || row.estimado === 0 || !row.votosReales) return "-";
+        const perc = ((row.votosReales / row.estimado) * 100).toFixed(1);
+        const color = row.votosReales >= row.estimado ? "text-emerald-600" : "text-amber-600";
+        return <span className={`font-semibold ${color}`}>{perc}%</span>;
+      }
+    },
+    {
+      key: "cumplimientoPotencial",
+      header: "% vs Potencial",
+      align: "center",
+      render: (row) => {
+        if (!row.totalPosible || row.totalPosible === 0 || !row.votosReales) return "-";
+        const perc = ((row.votosReales / row.totalPosible) * 100).toFixed(1);
+        return <span className="font-semibold text-slate-500">{perc}%</span>;
       }
     }
   ];
@@ -265,15 +286,19 @@ export default function PuestosPage() {
             ) : nivel === "departamentos" ? (
               <div className="space-y-1">
                 {departamentos.map(d => (
-                  <button 
-                    key={d.id} 
+                  <button
+                    key={d.id}
                     onClick={() => handleDeptoClick(d.id, d.nombre)}
                     className="w-full text-left p-3 rounded-lg hover:bg-slate-50 flex items-center justify-between group transition-colors"
                   >
                     <div>
                       <p className="font-semibold text-slate-800 group-hover:text-blue-600 transition-colors">{d.nombre}</p>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {d.totalPuestos} puestos | Est: {d.totalEstimado.toLocaleString("es-CO")} | Pot: {d.totalPosible.toLocaleString("es-CO")}
+                        {d.totalPuestos} puestos | Pot: {d.totalPosible > 0 ? d.totalPosible.toLocaleString("es-CO") : "–"}
+                      </p>
+                      <p className="text-xs mt-0.5 flex gap-2">
+                        <span className="text-indigo-500">Est: {d.totalEstimado > 0 ? d.totalEstimado.toLocaleString("es-CO") : "–"}</span>
+                        <span className="text-emerald-600 font-medium">E14: {d.totalVotosReales > 0 ? d.totalVotosReales.toLocaleString("es-CO") : "–"}</span>
                       </p>
                     </div>
                     <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-500 transition-colors" />
@@ -283,8 +308,8 @@ export default function PuestosPage() {
             ) : nivel === "municipios" ? (
               <div className="space-y-1">
                 {municipios.map(m => (
-                  <button 
-                    key={m.id} 
+                  <button
+                    key={m.id}
                     onClick={() => handleMuniClick(m.id, m.nombre)}
                     className="w-full text-left p-3 rounded-lg hover:bg-slate-50 flex items-center justify-between group transition-colors"
                   >
@@ -293,7 +318,11 @@ export default function PuestosPage() {
                       <div>
                         <p className="font-semibold text-slate-800 group-hover:text-blue-600">{m.nombre}</p>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {m.totalPuestos} puestos | Est: {m.totalEstimado.toLocaleString("es-CO")} | Pot: {m.totalPosible.toLocaleString("es-CO")}
+                          {m.totalPuestos} puestos | Pot: {m.totalPosible > 0 ? m.totalPosible.toLocaleString("es-CO") : "–"}
+                        </p>
+                        <p className="text-xs mt-0.5 flex gap-2">
+                          <span className="text-indigo-500">Est: {m.totalEstimado > 0 ? m.totalEstimado.toLocaleString("es-CO") : "–"}</span>
+                          <span className="text-emerald-600 font-medium">E14: {m.totalVotosReales > 0 ? m.totalVotosReales.toLocaleString("es-CO") : "–"}</span>
                         </p>
                       </div>
                     </div>
@@ -307,11 +336,20 @@ export default function PuestosPage() {
                 {puestos.map(p => (
                   <div key={p.id} className="p-3 rounded-lg border border-slate-100 bg-white hover:border-slate-300 transition-colors">
                     <p className="font-semibold text-slate-800 text-sm mb-1">{p.nombre}</p>
-                    <div className="flex items-center justify-between text-xs mt-1">
-                      <span className="text-slate-500">Zona {p.zona} | {p.mesas} mesas | Pot: {p.totalPosible.toLocaleString("es-CO")}</span>
-                      <span className="font-medium px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded">
-                        Est: {p.estimado.toLocaleString("es-CO")}
-                      </span>
+                    <p className="text-xs text-slate-400 mb-1.5">Zona {p.zona} · {p.mesas} mesas</p>
+                    <div className="grid grid-cols-3 gap-1 text-xs">
+                      <div className="text-center bg-slate-50 rounded px-1 py-0.5">
+                        <p className="text-slate-400">Potencial</p>
+                        <p className="font-semibold text-slate-600">{p.totalPosible > 0 ? p.totalPosible.toLocaleString("es-CO") : "–"}</p>
+                      </div>
+                      <div className="text-center bg-indigo-50 rounded px-1 py-0.5">
+                        <p className="text-indigo-400">Estimado</p>
+                        <p className="font-semibold text-indigo-700">{p.estimado > 0 ? p.estimado.toLocaleString("es-CO") : "–"}</p>
+                      </div>
+                      <div className="text-center bg-emerald-50 rounded px-1 py-0.5">
+                        <p className="text-emerald-500">E14</p>
+                        <p className="font-semibold text-emerald-700">{p.votosReales > 0 ? p.votosReales.toLocaleString("es-CO") : "–"}</p>
+                      </div>
                     </div>
                   </div>
                 ))}
