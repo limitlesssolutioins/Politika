@@ -4,31 +4,15 @@ import { prisma } from "@/lib/prisma";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const nivel = searchParams.get("nivel") || "departamentos";
-  const parentId = searchParams.get("parentId"); // deptoId o muniId
+  const parentId = searchParams.get("parentId");
 
   try {
     if (nivel === "departamentos") {
-      // Get departments and summarize puestos and estimated votes
-      const deptos = await prisma.departamento.findMany({
-        orderBy: { nombre: "asc" }
-      });
+      const deptos = await prisma.departamento.findMany({ orderBy: { nombre: "asc" } });
 
-      const puestos = await prisma.puesto.findMany({
-        include: {
-          zona: { select: { municipio: { select: { departamentoId: true } } } },
-          _count: { select: { mesas: true } }
-        }
-      });
-
-      const mesasAgg = await prisma.mesa.groupBy({
-        by: ['puestoId'],
-        _sum: { potencialElectoral: true }
-      });
-      const mesaPotencialMap = new Map(mesasAgg.map(m => [m.puestoId, m._sum.potencialElectoral || 0]));
-
-      // Votos reales (E14) agregados por departamento via SQL eficiente
-      const deptoVotesRaw = await prisma.$queryRaw<Array<{ departamentoId: number; totalVotos: number }>>`
-        SELECT mu.departamentoId, CAST(COALESCE(SUM(v.totalVotos), 0) AS INTEGER) as totalVotos
+      // Potencial = votos del E14 viejo ya en BD (suma real de participación anterior)
+      const potencialRaw = await prisma.$queryRaw<Array<{ departamentoId: number; total: number }>>`
+        SELECT mu.departamentoId, CAST(COALESCE(SUM(v.totalVotos), 0) AS INTEGER) as total
         FROM Voto v
         JOIN Mesa m ON v.mesaId = m.id
         JOIN Puesto p ON m.puestoId = p.id
@@ -36,31 +20,46 @@ export async function GET(request: NextRequest) {
         JOIN Municipio mu ON z.municipioId = mu.id
         GROUP BY mu.departamentoId
       `;
-      const deptoVotesMap = new Map<number, number>(
-        deptoVotesRaw.map(r => [r.departamentoId, Number(r.totalVotos) || 0])
+      const potencialMap = new Map<number, number>(
+        potencialRaw.map(r => [r.departamentoId, Number(r.total) || 0])
       );
 
-      const deptoStats = new Map<number, { totalPuestos: number, totalEstimado: number, totalPosible: number, mesas: number }>();
+      // Estimado y votos E14 nuevo desde Puesto directamente
+      const puestosAgg = await prisma.$queryRaw<Array<{
+        departamentoId: number;
+        totalPuestos: number;
+        totalEstimado: number;
+        totalVotosReales: number;
+        totalMesas: number;
+      }>>`
+        SELECT
+          mu.departamentoId,
+          COUNT(DISTINCT p.id)                            AS totalPuestos,
+          CAST(COALESCE(SUM(p.estimadoVotos), 0) AS INTEGER)  AS totalEstimado,
+          CAST(COALESCE(SUM(p.votosE14Real), 0) AS INTEGER)   AS totalVotosReales,
+          COUNT(DISTINCT me.id)                           AS totalMesas
+        FROM Puesto p
+        JOIN Zona z ON p.zonaId = z.id
+        JOIN Municipio mu ON z.municipioId = mu.id
+        LEFT JOIN Mesa me ON me.puestoId = p.id
+        GROUP BY mu.departamentoId
+      `;
+      const puestosMap = new Map<number, typeof puestosAgg[0]>(
+        puestosAgg.map(r => [r.departamentoId, r])
+      );
 
-      for (const p of puestos) {
-        const dId = p.zona.municipio.departamentoId;
-        const current = deptoStats.get(dId) || { totalPuestos: 0, totalEstimado: 0, totalPosible: 0, mesas: 0 };
-        current.totalPuestos += 1;
-        current.totalEstimado += (p.estimadoVotos || 0);
-        current.totalPosible += (p.potencialElectoral || mesaPotencialMap.get(p.id) || 0);
-        current.mesas += p._count.mesas;
-        deptoStats.set(dId, current);
-      }
-
-      const result = deptos.map(d => ({
-        id: d.id,
-        nombre: d.nombre,
-        totalPuestos: deptoStats.get(d.id)?.totalPuestos || 0,
-        totalEstimado: deptoStats.get(d.id)?.totalEstimado || 0,
-        totalPosible: deptoStats.get(d.id)?.totalPosible || 0,
-        totalMesas: deptoStats.get(d.id)?.mesas || 0,
-        totalVotosReales: deptoVotesMap.get(d.id) || 0,
-      }));
+      const result = deptos.map(d => {
+        const agg = puestosMap.get(d.id);
+        return {
+          id: d.id,
+          nombre: d.nombre,
+          totalPuestos:     Number(agg?.totalPuestos)     || 0,
+          totalEstimado:    Number(agg?.totalEstimado)    || 0,
+          totalPosible:     potencialMap.get(d.id)        || 0,
+          totalMesas:       Number(agg?.totalMesas)       || 0,
+          totalVotosReales: Number(agg?.totalVotosReales) || 0,
+        };
+      });
 
       return NextResponse.json(result);
     }
@@ -72,28 +71,9 @@ export async function GET(request: NextRequest) {
         orderBy: { nombre: "asc" }
       });
 
-      const puestos = await prisma.puesto.findMany({
-        where: { zona: { municipioId: { in: municipios.map(m => m.id) } } },
-        include: { zona: { select: { municipioId: true } }, _count: { select: { mesas: true } } }
-      });
-
-      const puestoIds = puestos.map(p => p.id);
-      const mesasAgg: { puestoId: number; _sum: { potencialElectoral: number | null } }[] = [];
-      const CHUNK_SIZE = 900;
-      for (let i = 0; i < puestoIds.length; i += CHUNK_SIZE) {
-        const chunk = puestoIds.slice(i, i + CHUNK_SIZE);
-        const batch = await prisma.mesa.groupBy({
-          by: ['puestoId'],
-          where: { puestoId: { in: chunk } },
-          _sum: { potencialElectoral: true }
-        });
-        mesasAgg.push(...batch);
-      }
-      const mesaPotencialMap = new Map(mesasAgg.map(m => [m.puestoId, m._sum.potencialElectoral || 0]));
-
-      // Votos reales (E14) agregados por municipio via SQL eficiente
-      const muniVotesRaw = await prisma.$queryRaw<Array<{ municipioId: number; totalVotos: number }>>`
-        SELECT z.municipioId, CAST(COALESCE(SUM(v.totalVotos), 0) AS INTEGER) as totalVotos
+      // Potencial = E14 viejo por municipio
+      const potencialRaw = await prisma.$queryRaw<Array<{ municipioId: number; total: number }>>`
+        SELECT z.municipioId, CAST(COALESCE(SUM(v.totalVotos), 0) AS INTEGER) as total
         FROM Voto v
         JOIN Mesa m ON v.mesaId = m.id
         JOIN Puesto p ON m.puestoId = p.id
@@ -102,106 +82,82 @@ export async function GET(request: NextRequest) {
         WHERE mu.departamentoId = ${deptoId}
         GROUP BY z.municipioId
       `;
-      const muniVotesMap = new Map<number, number>(
-        muniVotesRaw.map(r => [r.municipioId, Number(r.totalVotos) || 0])
+      const potencialMap = new Map<number, number>(
+        potencialRaw.map(r => [r.municipioId, Number(r.total) || 0])
       );
 
-      const muniStats = new Map<number, { totalPuestos: number, totalEstimado: number, totalPosible: number, mesas: number }>();
+      // Estimado, E14 nuevo y conteos por municipio
+      const puestosAgg = await prisma.$queryRaw<Array<{
+        municipioId: number;
+        totalPuestos: number;
+        totalEstimado: number;
+        totalVotosReales: number;
+        totalMesas: number;
+      }>>`
+        SELECT
+          z.municipioId,
+          COUNT(DISTINCT p.id)                            AS totalPuestos,
+          CAST(COALESCE(SUM(p.estimadoVotos), 0) AS INTEGER)  AS totalEstimado,
+          CAST(COALESCE(SUM(p.votosE14Real), 0) AS INTEGER)   AS totalVotosReales,
+          COUNT(DISTINCT me.id)                           AS totalMesas
+        FROM Puesto p
+        JOIN Zona z ON p.zonaId = z.id
+        JOIN Municipio mu ON z.municipioId = mu.id
+        LEFT JOIN Mesa me ON me.puestoId = p.id
+        WHERE mu.departamentoId = ${deptoId}
+        GROUP BY z.municipioId
+      `;
+      const puestosMap = new Map<number, typeof puestosAgg[0]>(
+        puestosAgg.map(r => [r.municipioId, r])
+      );
 
-      for (const p of puestos) {
-        const mId = p.zona.municipioId;
-        const current = muniStats.get(mId) || { totalPuestos: 0, totalEstimado: 0, totalPosible: 0, mesas: 0 };
-        current.totalPuestos += 1;
-        current.totalEstimado += (p.estimadoVotos || 0);
-        current.totalPosible += (p.potencialElectoral || mesaPotencialMap.get(p.id) || 0);
-        current.mesas += p._count.mesas;
-        muniStats.set(mId, current);
-      }
-
-      const result = municipios.map(m => ({
-        id: m.id,
-        nombre: m.nombre,
-        totalPuestos: muniStats.get(m.id)?.totalPuestos || 0,
-        totalEstimado: muniStats.get(m.id)?.totalEstimado || 0,
-        totalPosible: muniStats.get(m.id)?.totalPosible || 0,
-        totalMesas: muniStats.get(m.id)?.mesas || 0,
-        totalVotosReales: muniVotesMap.get(m.id) || 0,
-      }));
+      const result = municipios.map(m => {
+        const agg = puestosMap.get(m.id);
+        return {
+          id: m.id,
+          nombre: m.nombre,
+          totalPuestos:     Number(agg?.totalPuestos)     || 0,
+          totalEstimado:    Number(agg?.totalEstimado)    || 0,
+          totalPosible:     potencialMap.get(m.id)        || 0,
+          totalMesas:       Number(agg?.totalMesas)       || 0,
+          totalVotosReales: Number(agg?.totalVotosReales) || 0,
+        };
+      });
 
       return NextResponse.json(result);
     }
 
     if (nivel === "puestos" && parentId) {
-      // parentId is municipioId
+      const municipioId = parseInt(parentId);
+
       const puestos = await prisma.puesto.findMany({
-        where: { zona: { municipioId: parseInt(parentId) } },
+        where: { zona: { municipioId } },
         include: { _count: { select: { mesas: true } }, zona: { select: { codigo: true } } },
         orderBy: { nombre: "asc" }
       });
 
-      // Get real votes to compare
-      // For each puesto, calculate total actual votes across all its mesas
-      const puestoIds = puestos.map(p => p.id);
-      
-      const mesasAgg: { puestoId: number; _sum: { potencialElectoral: number | null } }[] = [];
-      const CHUNK_SIZE = 900;
-      for (let i = 0; i < puestoIds.length; i += CHUNK_SIZE) {
-        const chunk = puestoIds.slice(i, i + CHUNK_SIZE);
-        const batch = await prisma.mesa.groupBy({
-          by: ['puestoId'],
-          where: { puestoId: { in: chunk } },
-          _sum: { potencialElectoral: true }
-        });
-        mesasAgg.push(...batch);
-      }
-      const mesaPotencialMap = new Map(mesasAgg.map(m => [m.puestoId, m._sum.potencialElectoral || 0]));
-      
-      const mesaPuestoMap = new Map<number, number>();
-      
-      // Fetch in chunks to avoid SQLite "too many SQL variables" (limit 999)
-      const mesasObj = [];
-      for (let i = 0; i < puestoIds.length; i += CHUNK_SIZE) {
-        const chunk = puestoIds.slice(i, i + CHUNK_SIZE);
-        const batch = await prisma.mesa.findMany({
-          where: { puestoId: { in: chunk } },
-          select: { id: true, puestoId: true }
-        });
-        mesasObj.push(...batch);
-      }
-      
-      const mesaIds = mesasObj.map(m => m.id);
-      for (const m of mesasObj) mesaPuestoMap.set(m.id, m.puestoId);
-
-      const realVotes: { mesaId: number; _sum: { totalVotos: number | null } }[] = [];
-      if (mesaIds.length > 0) {
-        for (let i = 0; i < mesaIds.length; i += CHUNK_SIZE) {
-          const chunk = mesaIds.slice(i, i + CHUNK_SIZE);
-          const batch = await prisma.voto.groupBy({
-            by: ["mesaId"],
-            where: { mesaId: { in: chunk } },
-            _sum: { totalVotos: true }
-          });
-          realVotes.push(...batch);
-        }
-      }
-
-      const puestoRealVotes = new Map<number, number>();
-      for (const rv of realVotes) {
-        const pId = mesaPuestoMap.get(rv.mesaId);
-        if (pId) {
-          const current = puestoRealVotes.get(pId) || 0;
-          puestoRealVotes.set(pId, current + (rv._sum.totalVotos || 0));
-        }
-      }
+      // Potencial = E14 viejo por puesto (una sola consulta SQL eficiente)
+      const potencialRaw = await prisma.$queryRaw<Array<{ puestoId: number; total: number }>>`
+        SELECT m.puestoId, CAST(COALESCE(SUM(v.totalVotos), 0) AS INTEGER) as total
+        FROM Voto v
+        JOIN Mesa m ON v.mesaId = m.id
+        JOIN Puesto p ON m.puestoId = p.id
+        JOIN Zona z ON p.zonaId = z.id
+        WHERE z.municipioId = ${municipioId}
+        GROUP BY m.puestoId
+      `;
+      const potencialMap = new Map<number, number>(
+        potencialRaw.map(r => [r.puestoId, Number(r.total) || 0])
+      );
 
       const result = puestos.map(p => ({
         id: p.id,
         nombre: p.nombre,
         zona: p.zona.codigo,
         mesas: p._count.mesas,
-        estimado: p.estimadoVotos || 0,
-        totalPosible: p.potencialElectoral || mesaPotencialMap.get(p.id) || 0,
-        votosReales: puestoRealVotes.get(p.id) || 0
+        estimado:     p.estimadoVotos  || 0,
+        totalPosible: potencialMap.get(p.id) || 0,
+        votosReales:  p.votosE14Real   || 0,
       }));
 
       return NextResponse.json(result);

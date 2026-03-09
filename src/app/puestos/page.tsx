@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import dynamic from "next/dynamic";
-import { Upload, MapPin, Building2, ChevronRight, CheckCircle2, ArrowLeft } from "lucide-react";
+import { Upload, MapPin, Building2, ChevronRight, ArrowLeft, FileSpreadsheet, X, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import DataTable, { type Column } from "@/components/DataTable";
 import ImportModal from "@/components/ImportModal";
 
@@ -41,10 +41,13 @@ interface PuestoData {
   votosReales: number;
 }
 
-interface UploadResult {
+interface SimpleUploadResult {
+  success?: boolean;
   actualizados: number;
   noEncontrados: number;
   total: number;
+  tipo?: string;
+  error?: string;
 }
 
 export default function PuestosPage() {
@@ -52,15 +55,19 @@ export default function PuestosPage() {
   const [departamentos, setDepartamentos] = useState<DeptoData[]>([]);
   const [municipios, setMunicipios] = useState<MuniData[]>([]);
   const [puestos, setPuestos] = useState<PuestoData[]>([]);
-  
+
   const [selectedDepto, setSelectedDepto] = useState<{id: number, nombre: string} | null>(null);
   const [selectedMuni, setSelectedMuni] = useState<{id: number, nombre: string} | null>(null);
 
   const [loading, setLoading] = useState(true);
-  
-  // Upload states
+
+  // Estimados import (modal con IA)
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+
+  // E14 simple upload
+  const e14InputRef = useRef<HTMLInputElement>(null);
+  const [e14Uploading, setE14Uploading] = useState(false);
+  const [e14Result, setE14Result] = useState<SimpleUploadResult | null>(null);
 
   const fetchDepartamentos = () => {
     setLoading(true);
@@ -133,10 +140,31 @@ export default function PuestosPage() {
 
   const handleImportSuccess = () => {
     setIsImportModalOpen(false);
-    // Refresh current view
+    refreshCurrentView();
+  };
+
+  const refreshCurrentView = () => {
     if (nivel === "departamentos") fetchDepartamentos();
     else if (nivel === "municipios" && selectedDepto) handleDeptoClick(selectedDepto.id, selectedDepto.nombre);
     else if (nivel === "puestos" && selectedMuni) handleMuniClick(selectedMuni.id, selectedMuni.nombre);
+  };
+
+  const handleE14Upload = async (file: File) => {
+    setE14Uploading(true);
+    setE14Result(null);
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch("/api/puestos/upload?tipo=e14", { method: "POST", body: formData });
+      const data: SimpleUploadResult = await res.json();
+      setE14Result(data);
+      if (data.success) refreshCurrentView();
+    } catch {
+      setE14Result({ error: "Error de conexión", actualizados: 0, noEncontrados: 0, total: 0 });
+    } finally {
+      setE14Uploading(false);
+      if (e14InputRef.current) e14InputRef.current.value = "";
+    }
   };
 
   const columnsPuestos: Column<PuestoData>[] = [
@@ -145,7 +173,7 @@ export default function PuestosPage() {
     { key: "mesas", header: "Mesas", align: "center" },
     {
       key: "totalPosible",
-      header: "Potencial",
+      header: "Potencial E14 ant.",
       align: "right",
       render: (row) => row.totalPosible > 0 ? (
         <span className="text-slate-600">{row.totalPosible.toLocaleString("es-CO")}</span>
@@ -153,7 +181,7 @@ export default function PuestosPage() {
     },
     {
       key: "estimado",
-      header: "Estimados",
+      header: "Meta Estimada",
       align: "right",
       render: (row) => row.estimado > 0 ? (
         <span className="font-bold text-indigo-600">{row.estimado.toLocaleString("es-CO")}</span>
@@ -161,7 +189,7 @@ export default function PuestosPage() {
     },
     {
       key: "votosReales",
-      header: "Votos E14",
+      header: "Votos E14 nuevo",
       align: "right",
       render: (row) => row.votosReales > 0 ? (
         <span className="font-bold text-emerald-600">{row.votosReales.toLocaleString("es-CO")}</span>
@@ -169,7 +197,7 @@ export default function PuestosPage() {
     },
     {
       key: "cumplimiento",
-      header: "% vs Estimado",
+      header: "% vs Meta",
       align: "center",
       render: (row) => {
         if (!row.estimado || row.estimado === 0 || !row.votosReales) return "-";
@@ -225,14 +253,45 @@ export default function PuestosPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button 
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Botón subir estimados (IA) */}
+          <button
             onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium transition-colors hover:bg-slate-800"
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
           >
             <Upload size={16} />
-            Importar Datos
+            Subir Estimados
           </button>
+
+          {/* Botón subir E14 nuevo */}
+          <button
+            onClick={() => e14InputRef.current?.click()}
+            disabled={e14Uploading}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-60 transition-colors"
+          >
+            {e14Uploading
+              ? <Loader2 size={16} className="animate-spin" />
+              : <FileSpreadsheet size={16} />}
+            {e14Uploading ? "Procesando..." : "Subir E14"}
+          </button>
+          <input
+            ref={e14InputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleE14Upload(f); }}
+          />
+
+          {/* Resultado E14 */}
+          {e14Result && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${e14Result.error ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+              {e14Result.error
+                ? <><AlertCircle size={14} /> {e14Result.error}</>
+                : <><CheckCircle2 size={14} /> {e14Result.actualizados} puestos actualizados · {e14Result.noEncontrados} no encontrados</>
+              }
+              <button onClick={() => setE14Result(null)}><X size={14} /></button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -294,11 +353,11 @@ export default function PuestosPage() {
                     <div>
                       <p className="font-semibold text-slate-800 group-hover:text-blue-600 transition-colors">{d.nombre}</p>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {d.totalPuestos} puestos | Pot: {d.totalPosible > 0 ? d.totalPosible.toLocaleString("es-CO") : "–"}
+                        {d.totalPuestos} puestos | E14 ant: {d.totalPosible > 0 ? d.totalPosible.toLocaleString("es-CO") : "–"}
                       </p>
                       <p className="text-xs mt-0.5 flex gap-2">
-                        <span className="text-indigo-500">Est: {d.totalEstimado > 0 ? d.totalEstimado.toLocaleString("es-CO") : "–"}</span>
-                        <span className="text-emerald-600 font-medium">E14: {d.totalVotosReales > 0 ? d.totalVotosReales.toLocaleString("es-CO") : "–"}</span>
+                        <span className="text-indigo-500">Meta: {d.totalEstimado > 0 ? d.totalEstimado.toLocaleString("es-CO") : "–"}</span>
+                        <span className="text-emerald-600 font-medium">E14 nuevo: {d.totalVotosReales > 0 ? d.totalVotosReales.toLocaleString("es-CO") : "–"}</span>
                       </p>
                     </div>
                     <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-500 transition-colors" />
@@ -318,11 +377,11 @@ export default function PuestosPage() {
                       <div>
                         <p className="font-semibold text-slate-800 group-hover:text-blue-600">{m.nombre}</p>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {m.totalPuestos} puestos | Pot: {m.totalPosible > 0 ? m.totalPosible.toLocaleString("es-CO") : "–"}
+                          {m.totalPuestos} puestos | E14 ant: {m.totalPosible > 0 ? m.totalPosible.toLocaleString("es-CO") : "–"}
                         </p>
                         <p className="text-xs mt-0.5 flex gap-2">
-                          <span className="text-indigo-500">Est: {m.totalEstimado > 0 ? m.totalEstimado.toLocaleString("es-CO") : "–"}</span>
-                          <span className="text-emerald-600 font-medium">E14: {m.totalVotosReales > 0 ? m.totalVotosReales.toLocaleString("es-CO") : "–"}</span>
+                          <span className="text-indigo-500">Meta: {m.totalEstimado > 0 ? m.totalEstimado.toLocaleString("es-CO") : "–"}</span>
+                          <span className="text-emerald-600 font-medium">E14 nuevo: {m.totalVotosReales > 0 ? m.totalVotosReales.toLocaleString("es-CO") : "–"}</span>
                         </p>
                       </div>
                     </div>
@@ -339,15 +398,15 @@ export default function PuestosPage() {
                     <p className="text-xs text-slate-400 mb-1.5">Zona {p.zona} · {p.mesas} mesas</p>
                     <div className="grid grid-cols-3 gap-1 text-xs">
                       <div className="text-center bg-slate-50 rounded px-1 py-0.5">
-                        <p className="text-slate-400">Potencial</p>
+                        <p className="text-slate-400">E14 ant.</p>
                         <p className="font-semibold text-slate-600">{p.totalPosible > 0 ? p.totalPosible.toLocaleString("es-CO") : "–"}</p>
                       </div>
                       <div className="text-center bg-indigo-50 rounded px-1 py-0.5">
-                        <p className="text-indigo-400">Estimado</p>
+                        <p className="text-indigo-400">Meta</p>
                         <p className="font-semibold text-indigo-700">{p.estimado > 0 ? p.estimado.toLocaleString("es-CO") : "–"}</p>
                       </div>
                       <div className="text-center bg-emerald-50 rounded px-1 py-0.5">
-                        <p className="text-emerald-500">E14</p>
+                        <p className="text-emerald-500">E14 nuevo</p>
                         <p className="font-semibold text-emerald-700">{p.votosReales > 0 ? p.votosReales.toLocaleString("es-CO") : "–"}</p>
                       </div>
                     </div>

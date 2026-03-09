@@ -44,6 +44,7 @@ model Puesto {
   zonaId             Int
   estimadoVotos      Int?
   potencialElectoral Int?
+  votosE14Real       Int?
   zona               Zona   @relation(fields: [zonaId], references: [id])
   mesas              Mesa[]
 
