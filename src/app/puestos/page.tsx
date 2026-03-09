@@ -2,9 +2,8 @@
 
 import { useEffect, useState, useRef } from "react";
 import dynamic from "next/dynamic";
-import { Upload, MapPin, Building2, ChevronRight, ArrowLeft, FileSpreadsheet, X, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { MapPin, Building2, ChevronRight, ArrowLeft, FileSpreadsheet, X, CheckCircle2, AlertCircle, Loader2, BarChart2 } from "lucide-react";
 import DataTable, { type Column } from "@/components/DataTable";
-import ImportModal from "@/components/ImportModal";
 
 // Dynamically import map to avoid SSR issues with Leaflet
 const MapComponent = dynamic(() => import("@/components/MapComponent"), { ssr: false });
@@ -61,10 +60,12 @@ export default function PuestosPage() {
 
   const [loading, setLoading] = useState(true);
 
-  // Estimados import (modal con IA)
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  // Estimados upload
+  const estimadosInputRef = useRef<HTMLInputElement>(null);
+  const [estimadosUploading, setEstimadosUploading] = useState(false);
+  const [estimadosResult, setEstimadosResult] = useState<SimpleUploadResult | null>(null);
 
-  // E14 simple upload
+  // E14 nuevo upload
   const e14InputRef = useRef<HTMLInputElement>(null);
   const [e14Uploading, setE14Uploading] = useState(false);
   const [e14Result, setE14Result] = useState<SimpleUploadResult | null>(null);
@@ -138,32 +139,33 @@ export default function PuestosPage() {
     }
   };
 
-  const handleImportSuccess = () => {
-    setIsImportModalOpen(false);
-    refreshCurrentView();
-  };
-
   const refreshCurrentView = () => {
     if (nivel === "departamentos") fetchDepartamentos();
     else if (nivel === "municipios" && selectedDepto) handleDeptoClick(selectedDepto.id, selectedDepto.nombre);
     else if (nivel === "puestos" && selectedMuni) handleMuniClick(selectedMuni.id, selectedMuni.nombre);
   };
 
-  const handleE14Upload = async (file: File) => {
-    setE14Uploading(true);
-    setE14Result(null);
+  const handleSimpleUpload = async (
+    file: File,
+    tipo: "estimado" | "e14",
+    setUploading: (v: boolean) => void,
+    setResult: (v: SimpleUploadResult | null) => void,
+    inputRef: React.RefObject<HTMLInputElement | null>
+  ) => {
+    setUploading(true);
+    setResult(null);
     const formData = new FormData();
     formData.append("file", file);
     try {
-      const res = await fetch("/api/puestos/upload?tipo=e14", { method: "POST", body: formData });
+      const res = await fetch(`/api/puestos/upload?tipo=${tipo}`, { method: "POST", body: formData });
       const data: SimpleUploadResult = await res.json();
-      setE14Result(data);
+      setResult(data);
       if (data.success) refreshCurrentView();
     } catch {
-      setE14Result({ error: "Error de conexión", actualizados: 0, noEncontrados: 0, total: 0 });
+      setResult({ error: "Error de conexión", actualizados: 0, noEncontrados: 0, total: 0 });
     } finally {
-      setE14Uploading(false);
-      if (e14InputRef.current) e14InputRef.current.value = "";
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
     }
   };
 
@@ -254,24 +256,36 @@ export default function PuestosPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Botón subir estimados (IA) */}
+
+          {/* Botón subir estimados */}
           <button
-            onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+            onClick={() => estimadosInputRef.current?.click()}
+            disabled={estimadosUploading}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+            title="Excel con columnas: DEPARTAMENTO, MUNICIPIO, PUESTO, ESTIMADO"
           >
-            <Upload size={16} />
-            Subir Estimados
+            {estimadosUploading ? <Loader2 size={16} className="animate-spin" /> : <BarChart2 size={16} />}
+            {estimadosUploading ? "Procesando..." : "Subir Estimados"}
           </button>
+          <input
+            ref={estimadosInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) handleSimpleUpload(f, "estimado", setEstimadosUploading, setEstimadosResult, estimadosInputRef);
+            }}
+          />
 
           {/* Botón subir E14 nuevo */}
           <button
             onClick={() => e14InputRef.current?.click()}
             disabled={e14Uploading}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-60 transition-colors"
+            title="Excel con columnas: DEPARTAMENTO, MUNICIPIO, PUESTO, VOTOS"
           >
-            {e14Uploading
-              ? <Loader2 size={16} className="animate-spin" />
-              : <FileSpreadsheet size={16} />}
+            {e14Uploading ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
             {e14Uploading ? "Procesando..." : "Subir E14"}
           </button>
           <input
@@ -279,15 +293,29 @@ export default function PuestosPage() {
             type="file"
             accept=".xlsx,.xls,.csv"
             className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleE14Upload(f); }}
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) handleSimpleUpload(f, "e14", setE14Uploading, setE14Result, e14InputRef);
+            }}
           />
+
+          {/* Resultado estimados */}
+          {estimadosResult && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${estimadosResult.error ? "bg-red-50 text-red-700 border border-red-200" : "bg-indigo-50 text-indigo-700 border border-indigo-200"}`}>
+              {estimadosResult.error
+                ? <><AlertCircle size={14} /> {estimadosResult.error}</>
+                : <><CheckCircle2 size={14} /> Est: {estimadosResult.actualizados} actualizados · {estimadosResult.noEncontrados} no encontrados</>
+              }
+              <button onClick={() => setEstimadosResult(null)}><X size={14} /></button>
+            </div>
+          )}
 
           {/* Resultado E14 */}
           {e14Result && (
             <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${e14Result.error ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
               {e14Result.error
                 ? <><AlertCircle size={14} /> {e14Result.error}</>
-                : <><CheckCircle2 size={14} /> {e14Result.actualizados} puestos actualizados · {e14Result.noEncontrados} no encontrados</>
+                : <><CheckCircle2 size={14} /> E14: {e14Result.actualizados} actualizados · {e14Result.noEncontrados} no encontrados</>
               }
               <button onClick={() => setE14Result(null)}><X size={14} /></button>
             </div>
@@ -295,11 +323,6 @@ export default function PuestosPage() {
         </div>
       </div>
 
-      <ImportModal 
-        isOpen={isImportModalOpen} 
-        onClose={() => setIsImportModalOpen(false)} 
-        onSuccess={handleImportSuccess} 
-      />
 
       {/* Main Content */}
       <div className="flex flex-col lg:flex-row gap-6 h-full min-h-0 overflow-hidden">

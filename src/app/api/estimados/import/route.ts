@@ -291,16 +291,24 @@ export async function POST(req: NextRequest) {
     }
 
     // Si la acción es 'commit', guardamos en DB
+    // IMPORTANTE: usar asignación directa, no { increment } — en SQLite NULL + N = NULL
     let updatedCount = 0;
-    for (const [puestoId, conteo] of Object.entries(conteoPorPuestoId)) {
-      await prisma.puesto.update({
-        where: { id: Number(puestoId) },
-        data: { 
-          estimadoVotos: conteo.votos > 0 ? { increment: conteo.votos } : undefined,
-          potencialElectoral: conteo.potencial > 0 ? { increment: conteo.potencial } : undefined
-        }
-      });
-      updatedCount++;
+    const commitEntries = Object.entries(conteoPorPuestoId);
+    const BATCH = 500;
+    for (let i = 0; i < commitEntries.length; i += BATCH) {
+      const slice = commitEntries.slice(i, i + BATCH);
+      await prisma.$transaction(
+        slice.map(([puestoId, conteo]) =>
+          prisma.puesto.update({
+            where: { id: Number(puestoId) },
+            data: {
+              ...(conteo.votos > 0    ? { estimadoVotos:      conteo.votos }    : {}),
+              ...(conteo.potencial > 0 ? { potencialElectoral: conteo.potencial } : {}),
+            }
+          })
+        )
+      );
+      updatedCount += slice.length;
     }
 
     return NextResponse.json({
